@@ -37,13 +37,15 @@ test('game over when neither player can move', () => {
 });
 
 test('computer takes an available corner', () => {
-  const board = R.createBoard().map((row) => row.map(() => R.EMPTY));
+  // Opening position plus an edge pair that lets white capture the a1 corner.
+  const board = R.createBoard();
   board[0][1] = R.BLACK;
   board[0][2] = R.WHITE;
-  board[4][4] = R.BLACK;
-  board[5][5] = R.WHITE;
-  for (const depth of [1, 3]) {
-    assert.deepStrictEqual(R.chooseMove(board, R.WHITE, depth), { row: 0, col: 0 });
+  for (const depth of [1, 3, 5]) {
+    // chooseMove breaks ties randomly, so repeat to make sure it isn't luck.
+    for (let i = 0; i < 20; i++) {
+      assert.deepStrictEqual(R.chooseMove(board, R.WHITE, depth), { row: 0, col: 0 });
+    }
   }
 });
 
