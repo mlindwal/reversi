@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reversi</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <h1>Reversi</h1>
+
+    <section class="controls">
+      <label>
+        Opponent
+        <select id="mode">
+          <option value="human">Human (same device)</option>
+          <option value="cpu" selected>Computer</option>
+        </select>
+      </label>
+      <label id="difficulty-label">
+        Difficulty
+        <select id="difficulty">
+          <option value="1">Easy</option>
+          <option value="3" selected>Medium</option>
+          <option value="5">Hard</option>
+        </select>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="show-hints" checked>
+        Show valid moves
+      </label>
+      <button id="new-game" type="button">New game</button>
+      <button id="undo" type="button">Undo</button>
+    </section>
+
+    <section class="scoreboard">
+      <div class="score black" id="score-black">
+        <span class="disc-icon"></span>
+        <span class="name">Black</span>
+        <span class="count" id="count-black">2</span>
+      </div>
+      <div class="score white" id="score-white">
+        <span class="disc-icon"></span>
+        <span class="name">White</span>
+        <span class="count" id="count-white">2</span>
+      </div>
+    </section>
+
+    <p class="status" id="status" aria-live="polite"></p>
+
+    <div class="board" id="board" role="grid" aria-label="Reversi board"></div>
+
+    <details class="rules">
+      <summary>How to play</summary>
+      <ul>
+        <li>Black moves first. Players take turns placing one disc of their colour.</li>
+        <li>A move must outflank one or more of the opponent's discs: they must lie in a
+          straight line (horizontal, vertical or diagonal) between the new disc and
+          another disc of your colour.</li>
+        <li>All outflanked discs are flipped to your colour.</li>
+        <li>If you have no legal move, your turn is passed. The game ends when neither
+          player can move.</li>
+        <li>The player with the most discs at the end wins.</li>
+      </ul>
+    </details>
+  </main>
+
+  <script src="game.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
