@@ -1,0 +1,9 @@
+{
+  "name": "reversi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reversi in plain JavaScript and HTML",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
