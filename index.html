@@ -17,8 +17,7 @@
         <select id="mode">
           <option value="cpu" selected>Computer</option>
           <option value="human">Human (same device)</option>
-          <option value="online">Online (live)</option>
-          <option value="link">Online (send links)</option>
+          <option value="online">Online</option>
         </select>
       </label>
       <label id="difficulty-label">
@@ -39,23 +38,23 @@
 
     <section class="panel" id="online-panel" hidden>
       <p class="panel-status" id="online-status"></p>
-      <div id="invite" hidden>
-        <p>Send this invite link to your opponent. They play <span id="invite-color">White</span>.</p>
+      <div class="panel-actions">
+        <button type="button" id="take-seat" hidden>Take the seat</button>
+        <button type="button" id="use-theirs" hidden>Use their version</button>
+      </div>
+      <div id="invite">
+        <p id="invite-text"></p>
         <div class="share-row">
-          <input type="text" id="invite-url" readonly aria-label="Invite link">
+          <input type="text" id="invite-url" readonly aria-label="Game link">
           <button type="button" class="copy" data-target="invite-url">Copy</button>
           <button type="button" class="share" data-target="invite-url" hidden>Share</button>
         </div>
       </div>
     </section>
 
-    <section class="panel" id="link-panel" hidden>
-      <p class="panel-status" id="link-status"></p>
-      <div class="share-row" id="link-share" hidden>
-        <input type="text" id="link-url" readonly aria-label="Game link">
-        <button type="button" class="copy" data-target="link-url">Copy</button>
-        <button type="button" class="share" data-target="link-url" hidden>Share</button>
-      </div>
+    <section class="panel" id="resume-panel" hidden>
+      <p>Online games you can go back to:</p>
+      <ul class="resume-list" id="resume-list"></ul>
     </section>
 
     <section class="scoreboard">
@@ -87,10 +86,10 @@
           player can move.</li>
         <li>The player with the most discs at the end wins.</li>
       </ul>
-      <p><strong>Online (live):</strong> send the invite link to a friend and play in real
-        time. Moves go directly between your browsers.</p>
-      <p><strong>Online (send links):</strong> make your move, then send the link to your
-        opponent through any chat app. They open it, move, and send a link back.</p>
+      <p><strong>Online:</strong> send the game link to a friend and play in real time.
+        Moves go directly between your browsers. Anyone else who opens the link can
+        watch. If you close the tab, open the link again (or use Resume on the start
+        page) to carry on.</p>
     </details>
   </main>
 
