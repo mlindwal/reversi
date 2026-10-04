@@ -50,7 +50,9 @@ If your saved copy is out of date (for example, you continued the game on anothe
 ### Connection problems
 
 - Some strict networks (certain corporate, school or mobile networks) block direct browser-to-browser connections. Fixing that requires a TURN relay server, which this project does not include.
-- Trystero occasionally leaves a connection half-open: one side thinks it's connected, the other doesn't. The page detects this, because a healthy peer always sends something straight away, and reconnects. That usually takes under 20 seconds.
+- Trystero occasionally leaves a connection half-open: one side thinks it's connected, the other doesn't. The page detects this, because a healthy peer always sends something straight away, and reconnects by itself.
+- If nothing happens for 15 seconds, the page offers a **Reconnect** button. Reloading the page works too, since the game is saved.
+- To see what's going on, add `?debug` to the page URL (for example `…/index.html?debug#room=…`) and open the browser console. It logs peers connecting, messages and errors.
 
 Trystero is bundled in `vendor/trystero-nostr.mjs` rather than loaded from a CDN, and only loads when you choose online play.
 

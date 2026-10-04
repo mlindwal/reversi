@@ -10,6 +10,7 @@
   var R = window.Reversi;
   var Online = window.ReversiOnline;
   var CPU_DELAY_MS = 450;
+  var STALLED_MS = 15000; // offer to reconnect after waiting this long
   var HUMAN_COLOR = R.BLACK; // In computer mode the human plays black.
 
   var boardEl = document.getElementById('board');
@@ -30,6 +31,7 @@
   var onlineStatusEl = document.getElementById('online-status');
   var takeSeatBtn = document.getElementById('take-seat');
   var useTheirsBtn = document.getElementById('use-theirs');
+  var reconnectBtn = document.getElementById('reconnect');
   var inviteEl = document.getElementById('invite');
   var inviteTextEl = document.getElementById('invite-text');
   var inviteUrlEl = document.getElementById('invite-url');
@@ -43,13 +45,15 @@
   var notice = '';     // one-off message shown in the status line
   var cells = [];
   var cpuTimer = null;
+  var stalledTimer = null;
 
   // The live game, or null when not in a room. Fields:
   //   roomId, side (R.BLACK / R.WHITE, or null without a seat), g (game
   //   number, raised by "New game"), role ('joining' until we know whether a
   //   seat is free, then 'player' or 'spectator'), status (connection state),
   //   clash, trouble (connection warning), conflict, openSeat, error,
-  //   connection, release (frees the seat lock), claiming.
+  //   connection, release (frees the seat lock), claiming, phase and
+  //   phaseSince (how long we've been in the current role/status).
   var online = null;
 
   // ---- Helpers ---------------------------------------------------------
@@ -612,10 +616,25 @@
   }
 
   function renderOnlinePanel() {
+    clearTimeout(stalledTimer);
     onlinePanelEl.hidden = mode !== 'online';
     if (mode !== 'online') return;
     var session = online;
     var text;
+
+    // Waiting to hear from the other player for a while usually means the
+    // connection is stuck; reconnecting fixes the rare broken one.
+    var phase = session.role + '/' + session.status;
+    if (phase !== session.phase) {
+      session.phase = phase;
+      session.phaseSince = Date.now();
+    }
+    var waiting = !!session.connection && session.status !== 'error' &&
+      (session.role === 'joining' || (session.role === 'player' && session.status !== 'connected'));
+    var waited = Date.now() - session.phaseSince;
+    var stalled = waiting && waited >= STALLED_MS;
+    if (waiting && !stalled) stalledTimer = setTimeout(render, STALLED_MS - waited + 50);
+
     if (session.status === 'error') {
       text = session.error;
     } else if (session.status === 'connecting') {
@@ -636,6 +655,7 @@
         disconnected: 'Your opponent disconnected. Waiting for them to come back…'
       }[session.status];
     }
+    if (stalled) text += ' Taking a while? Try reconnecting.';
     if (session.trouble && session.status !== 'error') {
       text += ' Having trouble connecting (' + session.trouble + '); still trying. ' +
         'Some networks block direct browser-to-browser connections.';
@@ -657,6 +677,7 @@
       takeSeatBtn.textContent = 'Play as ' + colorName(colorFromCode(session.openSeat.side));
     }
     useTheirsBtn.hidden = !session.conflict;
+    reconnectBtn.hidden = !stalled;
 
     inviteEl.hidden = session.status === 'error';
     inviteTextEl.textContent = session.role === 'player' && session.status === 'waiting' ?
@@ -754,6 +775,12 @@
     if (online && online.openSeat) claimSeat(online, online.openSeat);
   });
   useTheirsBtn.addEventListener('click', useTheirVersion);
+  reconnectBtn.addEventListener('click', function () {
+    if (!online || !online.connection) return;
+    online.connection.reconnect();
+    online.phaseSince = Date.now();
+    render();
+  });
   modeEl.addEventListener('change', function () { startMode(modeEl.value); });
   hintsEl.addEventListener('change', render);
   window.addEventListener('hashchange', function () {

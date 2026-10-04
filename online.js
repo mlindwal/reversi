@@ -17,6 +17,21 @@
   var LIBRARY_URL = './vendor/trystero-nostr.mjs';
   var MAX_MOVES_LENGTH = 120; // 60 moves of two characters
   var SILENT_PEER_MS = 8000;
+  // Trystero finishes leaving a room asynchronously, and that cleanup
+  // cancels the relay subscription of a new join of the same room made in
+  // the meantime, leaving it unable to find anyone. So a room is only joined
+  // again once this long has passed since it was left.
+  var REJOIN_DELAY_MS = 1000;
+  var lastLeft = {}; // roomId -> time it was last left
+
+  // Add ?debug to the page URL to log connection events to the console.
+  var DEBUG = typeof location !== 'undefined' && /[?&]debug\b/.test(location.search);
+
+  function debug() {
+    if (!DEBUG) return;
+    var args = Array.prototype.slice.call(arguments);
+    console.log.apply(console, ['[reversi ' + new Date().toISOString().slice(11, 23) + ']'].concat(args));
+  }
 
   function isValidAnnouncement(data) {
     return !!data &&
@@ -94,6 +109,16 @@
     return announcements.some(function (data) { return data.side !== null; });
   }
 
+  function waitBeforeJoining(roomId) {
+    var wait = (lastLeft[roomId] || 0) + REJOIN_DELAY_MS - Date.now();
+    return new Promise(function (resolve) { setTimeout(resolve, Math.max(0, wait)); });
+  }
+
+  function leaveRoom(roomId, room) {
+    room.leave();
+    lastLeft[roomId] = Date.now();
+  }
+
   // Joins the room for `roomId`. `handlers` provides:
   //   getState()          -> { side: 'b' | 'w' | null, g, moves: "d3c5..." }
   //   onConnect()            an opponent connected (or a new one took over)
@@ -104,22 +129,24 @@
   //   onSideClash(active)    whether another peer claims the same colour as us
   //   onTrouble(message)     connecting keeps failing (message), or works
   //                          again (null)
-  // Resolves to { announce(), openSeat(), hasPlayers(), leave() }. Call
-  // announce() whenever the local state (including the side) changes.
+  // Resolves to { announce(), openSeat(), hasPlayers(), reconnect(), leave() }.
+  // Call announce() whenever the local state (including the side) changes.
+  // reconnect() leaves and rejoins the room, dropping all connections.
   //
   // A player's opponent is the first peer seen on the other side, and stays
   // the opponent until they leave, so nobody else can take over a game. Other
   // peers on that side wait; one takes over if the opponent leaves.
   function connect(roomId, handlers) {
-    return import(LIBRARY_URL).then(function (trystero) {
+    return Promise.all([import(LIBRARY_URL), waitBeforeJoining(roomId)]).then(function (loaded) {
+      var trystero = loaded[0];
       var room = null;
       var syncAction = null;
       var peers = {}; // peerId -> latest announcement
       var opponentId = null;
       var clashing = false;
       var failures = 0;
-      var retryTimer = null;
       var left = false;
+      var reconnecting = false;
 
       function announcements() {
         return Object.keys(peers).map(function (id) { return peers[id]; });
@@ -131,7 +158,7 @@
       }
 
       function broadcast() {
-        syncAction.send(announcement());
+        if (!reconnecting) syncAction.send(announcement());
       }
 
       // Re-derives the opponent and clash state after anything changed.
@@ -166,38 +193,36 @@
         broadcast(); // Let everyone know whether we have an opponent.
       }
 
-      function hasConnectedPeers() {
-        return Object.keys(room.getPeers()).length > 0;
-      }
-
-      // A failed connection attempt isn't retried quickly by Trystero, so
-      // when we're connected to nobody, leave and join the room again. With
-      // a working connection to someone, we stay put; whoever failed to reach
-      // us retries from their side.
+      // Trystero reports every failed connection attempt here, including
+      // routine ones while it tries several routes at once, and keeps trying
+      // by itself. So this only warns when failures pile up; reconnecting on
+      // every error would keep interrupting attempts still in progress.
       function onJoinError(details) {
+        debug('join error', details && details.error);
         if (left) return;
         failures += 1;
         if (failures >= 3) {
           handlers.onTrouble(details && details.error ? String(details.error) : 'Connection failed.');
         }
-        if (retryTimer !== null || hasConnectedPeers()) return;
-        retryTimer = setTimeout(function () {
-          retryTimer = null;
-          if (!left && !hasConnectedPeers()) rejoin();
-        }, 1000 + Math.random() * 2000);
       }
 
-      function rejoin() {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-        room.leave();
+      function reconnect() {
+        if (reconnecting || left) return;
+        debug('reconnecting');
+        reconnecting = true;
+        leaveRoom(roomId, room);
         peers = {};
-        join();
-        evaluate();
-        handlers.onPeersChanged();
+        waitBeforeJoining(roomId).then(function () {
+          reconnecting = false;
+          if (left) return;
+          join();
+          evaluate();
+          handlers.onPeersChanged();
+        });
       }
 
       function join() {
+        debug('joining room', roomId, 'as peer', trystero.selfId);
         var thisRoom = trystero.joinRoom({ appId: APP_ID }, roomId, { onJoinError: onJoinError });
         var action = thisRoom.makeAction('sync');
         room = thisRoom;
@@ -206,27 +231,24 @@
         // Trystero drops messages that arrive while the receiving side is
         // still finishing its handshake, so this greeting can be lost. The
         // reply to a peer's first message (below) makes up for that.
-        //
-        // Occasionally the handshake completes on our side only, leaving a
-        // half-open connection that Trystero doesn't repair for minutes. A
-        // healthy peer always sends us something right after connecting, so
-        // a silent peer means a broken connection. Joining the room again
-        // fixes it quickly but briefly drops everyone, so a player connected
-        // to an opponent only closes the broken connection instead.
         thisRoom.onPeerJoin = function (peerId) {
+          debug('peer connected', peerId);
           action.send(announcement(), { target: peerId });
+          // Occasionally the handshake completes on our side only, and
+          // Trystero never repairs that: the other side keeps retrying and
+          // timing out. A healthy peer always sends something right after
+          // connecting, so silence means a broken connection; only this side
+          // can see it, so only this side reconnects. A player connected to
+          // an opponent leaves it alone rather than drop the game.
           setTimeout(function () {
-            if (room !== thisRoom || left || peers[peerId]) return;
-            if (opponentId === null) {
-              rejoin();
-            } else {
-              var connection = thisRoom.getPeers()[peerId];
-              if (connection) connection.close();
-            }
+            if (room !== thisRoom || left || reconnecting || peers[peerId]) return;
+            debug('peer stayed silent', peerId);
+            if (opponentId === null) reconnect();
           }, SILENT_PEER_MS);
         };
 
         thisRoom.onPeerLeave = function (peerId) {
+          debug('peer left', peerId);
           if (room !== thisRoom || !peers[peerId]) return;
           delete peers[peerId];
           evaluate();
@@ -234,6 +256,7 @@
         };
 
         action.onMessage = function (data, meta) {
+          debug('message from', meta.peerId, data);
           if (room !== thisRoom || !isValidAnnouncement(data)) return;
           if (failures > 0) {
             failures = 0;
@@ -267,10 +290,10 @@
         hasPlayers: function () {
           return hasPlayers(announcements());
         },
+        reconnect: reconnect,
         leave: function () {
           left = true;
-          clearTimeout(retryTimer);
-          room.leave();
+          if (!reconnecting) leaveRoom(roomId, room);
         }
       };
     });
