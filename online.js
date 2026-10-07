@@ -17,8 +17,8 @@
   var APP_ID = 'github.com/mlindwal/reversi';
   var LIBRARY_URL = './vendor/trystero-nostr.mjs';
   // URL of the Worker in worker/ that hands out TURN credentials (see the
-  // README). Leave empty to play without TURN: direct connections only.
-  var TURN_CREDENTIALS_URL = '';
+  // README). Set to '' to play without TURN: direct connections only.
+  var TURN_CREDENTIALS_URL = 'https://turn.reversi.lindwall.dev/';
   var TURN_FETCH_TIMEOUT_MS = 5000;
   var MAX_MOVES_LENGTH = 120; // 60 moves of two characters
   var SILENT_PEER_MS = 8000;

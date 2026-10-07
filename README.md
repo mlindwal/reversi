@@ -60,7 +60,7 @@ Trystero is bundled in `vendor/trystero-nostr.mjs` rather than loaded from a CDN
 
 When two browsers can't reach each other directly, a TURN server relays their traffic, still encrypted end to end. This project can use [Cloudflare's TURN service](https://developers.cloudflare.com/realtime/turn/). Cloudflare issues short-lived credentials from a secret API token, so a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) in `worker/` creates them. The token is stored in Cloudflare, never in this repository, so the repository can stay public.
 
-Without it, the game works exactly as before: direct connections only. If the Worker can't be reached, the page waits at most 5 seconds and then connects without TURN.
+Without TURN, the game uses direct connections only. If the Worker can't be reached, the page waits at most 5 seconds and then connects without TURN.
 
 ### Setup
 
@@ -78,11 +78,12 @@ You need a Cloudflare TURN key: its **key ID** and **API token**, from the Cloud
    npx wrangler secret put TURN_KEY_ID
    npx wrangler secret put TURN_KEY_API_TOKEN
    ```
-4. Deploy, and note the URL it prints (like `https://reversi-turn.<your-subdomain>.workers.dev`):
+4. Deploy:
    ```sh
    npx wrangler deploy
    ```
-5. Put that URL in `TURN_CREDENTIALS_URL` near the top of `online.js`, then commit and publish the page. The URL isn't secret.
+   This serves the Worker at `https://turn.reversi.lindwall.dev`, set by `routes` in `worker/wrangler.toml`; the `lindwall.dev` domain must be in the same Cloudflare account. To use a different address, change `routes` there.
+5. The game asks for credentials at the address in `TURN_CREDENTIALS_URL`, near the top of `online.js`. It's set to `https://turn.reversi.lindwall.dev/`, so it only needs changing if the Worker lives elsewhere. Set it to `''` to turn TURN off. The URL isn't secret.
 
 To check it works, open the game with `?debug` and choose Online. The console should say `joining room … with TURN`.
 

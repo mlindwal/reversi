@@ -7,6 +7,13 @@ name = "reversi-turn"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
+# Serve the Worker on its own subdomain; `wrangler deploy` sets this up. The
+# lindwall.dev domain must be in the same Cloudflare account. The game reads
+# this address from TURN_CREDENTIALS_URL in online.js.
+routes = [
+  { pattern = "turn.reversi.lindwall.dev", custom_domain = true }
+]
+
 [vars]
 # Pages allowed to ask for credentials (comma-separated origins: scheme, host
 # and port). Browsers never send the path, so an origin covers every page on
