@@ -5,7 +5,7 @@
   "description": "Reversi in plain JavaScript and HTML",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "vendor": "esbuild vendor/trystero-entry.mjs --bundle --format=esm --minify --target=es2020 --legal-comments=inline --outfile=vendor/trystero-nostr.mjs"
+    "vendor": "esbuild tools/trystero-entry.mjs --bundle --format=esm --minify --target=es2020 --legal-comments=inline --outfile=docs/vendor/trystero-nostr.mjs"
   },
   "devDependencies": {
     "@trystero-p2p/nostr": "0.25.4",

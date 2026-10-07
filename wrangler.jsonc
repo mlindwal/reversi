@@ -1,0 +1,13 @@
+// Deploys the game itself as the "reversi" Cloudflare Worker: only the files
+// in docs/ are published. GitHub Pages publishes the same folder. The TURN
+// credentials Worker ("reversi-turn") has its own configuration in worker/.
+{
+  "name": "reversi",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./docs"
+  },
+  "routes": [
+    { "pattern": "reversi.lindwall.dev", "custom_domain": true }
+  ]
+}

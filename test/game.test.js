@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const R = require('../game.js');
+const R = require('../docs/game.js');
 
 test('initial board has four discs and four moves for black', () => {
   const board = R.createBoard();

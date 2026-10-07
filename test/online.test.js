@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const R = require('../game.js');
-const { resolveSync, findOpenSeat } = require('../online.js');
+const R = require('../docs/game.js');
+const { resolveSync, findOpenSeat } = require('../docs/online.js');
 
 // Local player is White; the opponent is Black.
 const local = (g, moves) => ({ g, moves });
