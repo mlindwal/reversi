@@ -4,10 +4,10 @@ A playable Reversi (Othello) game written in plain JavaScript, HTML and CSS. The
 
 ## Play
 
-Open `index.html` in a browser for computer or same-device games. Online play needs the page served from a web server:
+The game is the `docs/` folder. Open `docs/index.html` in a browser for computer or same-device games. Online play needs the page served from a web server:
 
 ```sh
-python3 -m http.server 8000   # then visit http://localhost:8000
+python3 -m http.server 8000 --directory docs   # then visit http://localhost:8000
 ```
 
 Opponents:
@@ -20,7 +20,10 @@ Also: move hints (can be turned off), automatic passes, undo (not in online game
 
 ## Hosting
 
-Online play needs the page at a public URL so your opponent can open it. Any static host works, for example GitHub Pages: in the repository's **Settings → Pages**, choose "Deploy from a branch", pick the default branch and the root folder, and share the URL it gives you.
+Online play needs the page at a public URL so your opponent can open it. Any static host that serves the `docs/` folder works. This repository is set up for two:
+
+- **GitHub Pages** (lindwall.info/reversi): in the repository's **Settings → Pages**, choose "Deploy from a branch", then the default branch and the `/docs` folder.
+- **Cloudflare** (reversi.lindwall.dev): `wrangler.jsonc` in the repository root deploys `docs/` as the `reversi` Worker on that domain, publishing only that folder. In the Worker's build settings, leave the root directory as the repository root; the deploy command is `npx wrangler deploy`.
 
 It also needs a secure page (`https://`, or `http://localhost` for testing), because browsers only allow the encryption it uses there.
 
@@ -54,7 +57,7 @@ If your saved copy is out of date (for example, you continued the game on anothe
 - If nothing happens for 15 seconds, the page offers a **Reconnect** button. Reloading the page works too, since the game is saved.
 - To see what's going on, add `?debug` to the page URL (for example `…/index.html?debug#room=…`) and open the browser console. It logs peers connecting, messages and errors.
 
-Trystero is bundled in `vendor/trystero-nostr.mjs` rather than loaded from a CDN, and only loads when you choose online play.
+Trystero is bundled in `docs/vendor/trystero-nostr.mjs` rather than loaded from a CDN, and only loads when you choose online play.
 
 ## TURN relay (optional)
 
@@ -83,7 +86,9 @@ You need a Cloudflare TURN key: its **key ID** and **API token**, from the Cloud
    npx wrangler deploy
    ```
    This serves the Worker at `https://turn.reversi.lindwall.dev`, set by `routes` in `worker/wrangler.toml`; the `lindwall.dev` domain must be in the same Cloudflare account. To use a different address, change `routes` there.
-5. The game asks for credentials at the address in `TURN_CREDENTIALS_URL`, near the top of `online.js`. It's set to `https://turn.reversi.lindwall.dev/`, so it only needs changing if the Worker lives elsewhere. Set it to `''` to turn TURN off. The URL isn't secret.
+5. The game asks for credentials at the address in `TURN_CREDENTIALS_URL`, near the top of `docs/online.js`. It's set to `https://turn.reversi.lindwall.dev/`, so it only needs changing if the Worker lives elsewhere. Set it to `''` to turn TURN off. The URL isn't secret.
+
+To deploy `reversi-turn` automatically from GitHub instead, connect it to this repository in Cloudflare. In its build settings, set the root directory to `worker` and the production branch to `main`, and turn off builds for other branches.
 
 To check it works, open the game with `?debug` and choose Online. The console should say `joining room … with TURN`.
 
@@ -103,13 +108,16 @@ TURN is only used when a direct connection fails, and a game sends very little d
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | Page layout |
-| `style.css` | Styling |
-| `game.js` | Game rules, move notation, replaying a move list, and the computer player (no DOM; also loadable in Node) |
-| `ui.js` | Board rendering, modes, saved games, seats and input handling |
-| `online.js` | Online play: connecting through Trystero, finding free seats, and deciding whether to accept another player's game |
-| `vendor/trystero-nostr.mjs` | Bundled Trystero library (generated, do not edit) |
-| `worker/` | Optional Cloudflare Worker that hands out TURN credentials |
+| `docs/` | The game: everything in it is published, nothing else |
+| `docs/index.html` | Page layout |
+| `docs/style.css` | Styling |
+| `docs/game.js` | Game rules, move notation, replaying a move list, and the computer player (no DOM; also loadable in Node) |
+| `docs/ui.js` | Board rendering, modes, saved games, seats and input handling |
+| `docs/online.js` | Online play: connecting through Trystero, finding free seats, and deciding whether to accept another player's game |
+| `docs/vendor/trystero-nostr.mjs` | Bundled Trystero library (generated, do not edit) |
+| `wrangler.jsonc` | Cloudflare config for the game (the `reversi` Worker) |
+| `worker/` | Optional Cloudflare Worker (`reversi-turn`) that hands out TURN credentials |
+| `tools/trystero-entry.mjs` | Entry point for bundling Trystero |
 | `test/*.test.js` | Tests for the rules, notation, online sync and the Worker |
 
 ## Development
@@ -117,5 +125,5 @@ TURN is only used when a direct connection fails, and a game sends very little d
 ```sh
 npm test         # Node's built-in test runner, Node 18+; no install needed (also tests the Worker)
 npm install      # only needed to regenerate the bundled library
-npm run vendor   # rebuilds vendor/trystero-nostr.mjs from package.json versions
+npm run vendor   # rebuilds docs/vendor/trystero-nostr.mjs from package.json versions
 ```
