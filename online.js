@@ -1,6 +1,7 @@
 // Live online play over WebRTC. Peers find each other through public Nostr
 // relays (via the bundled Trystero library); data then travels directly
-// between browsers. There is no server of our own.
+// between browsers. When a TURN credentials URL is set below, browsers that
+// can't reach each other directly relay through Cloudflare's TURN servers.
 //
 // Everyone in a room repeatedly announces
 //   { side: 'b' | 'w' | null, g: game number, moves: "d3c5...", opponent: bool }
@@ -15,6 +16,10 @@
 
   var APP_ID = 'github.com/mlindwal/reversi';
   var LIBRARY_URL = './vendor/trystero-nostr.mjs';
+  // URL of the Worker in worker/ that hands out TURN credentials (see the
+  // README). Leave empty to play without TURN: direct connections only.
+  var TURN_CREDENTIALS_URL = '';
+  var TURN_FETCH_TIMEOUT_MS = 5000;
   var MAX_MOVES_LENGTH = 120; // 60 moves of two characters
   var SILENT_PEER_MS = 8000;
   // Trystero finishes leaving a room asynchronously, and that cleanup
@@ -109,6 +114,34 @@
     return announcements.some(function (data) { return data.side !== null; });
   }
 
+  // Fetches TURN servers from the credentials Worker. Resolves to a list of
+  // ICE servers, or null when TURN isn't set up or the Worker can't be
+  // reached, in which case the game connects without TURN.
+  function fetchTurnServers() {
+    if (!TURN_CREDENTIALS_URL || typeof fetch !== 'function') return Promise.resolve(null);
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () {
+      if (controller) controller.abort();
+    }, TURN_FETCH_TIMEOUT_MS);
+    return fetch(TURN_CREDENTIALS_URL, { cache: 'no-store', signal: controller ? controller.signal : undefined })
+      .then(function (response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function (data) {
+        var servers = data && Array.isArray(data.iceServers) ? data.iceServers : [];
+        debug('got', servers.length, 'TURN server entries');
+        return servers.length > 0 ? servers : null;
+      }, function (error) {
+        debug('continuing without TURN:', error && error.message);
+        return null;
+      })
+      .then(function (servers) {
+        clearTimeout(timer);
+        return servers;
+      });
+  }
+
   function waitBeforeJoining(roomId) {
     var wait = (lastLeft[roomId] || 0) + REJOIN_DELAY_MS - Date.now();
     return new Promise(function (resolve) { setTimeout(resolve, Math.max(0, wait)); });
@@ -137,8 +170,13 @@
   // the opponent until they leave, so nobody else can take over a game. Other
   // peers on that side wait; one takes over if the opponent leaves.
   function connect(roomId, handlers) {
-    return Promise.all([import(LIBRARY_URL), waitBeforeJoining(roomId)]).then(function (loaded) {
+    return Promise.all([
+      import(LIBRARY_URL),
+      fetchTurnServers(),
+      waitBeforeJoining(roomId)
+    ]).then(function (loaded) {
       var trystero = loaded[0];
+      var turnServers = loaded[1];
       var room = null;
       var syncAction = null;
       var peers = {}; // peerId -> latest announcement
@@ -212,7 +250,9 @@
         reconnecting = true;
         leaveRoom(roomId, room);
         peers = {};
-        waitBeforeJoining(roomId).then(function () {
+        // Fetch fresh credentials too, in case the old ones have expired.
+        Promise.all([fetchTurnServers(), waitBeforeJoining(roomId)]).then(function (loaded) {
+          if (loaded[0]) turnServers = loaded[0];
           reconnecting = false;
           if (left) return;
           join();
@@ -222,8 +262,11 @@
       }
 
       function join() {
-        debug('joining room', roomId, 'as peer', trystero.selfId);
-        var thisRoom = trystero.joinRoom({ appId: APP_ID }, roomId, { onJoinError: onJoinError });
+        debug('joining room', roomId, 'as peer', trystero.selfId, turnServers ? 'with TURN' : 'without TURN');
+        var config = { appId: APP_ID };
+        // Trystero uses these alongside its default STUN servers.
+        if (turnServers) config.turnConfig = turnServers;
+        var thisRoom = trystero.joinRoom(config, roomId, { onJoinError: onJoinError });
         var action = thisRoom.makeAction('sync');
         room = thisRoom;
         syncAction = action;

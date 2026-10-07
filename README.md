@@ -49,12 +49,54 @@ If your saved copy is out of date (for example, you continued the game on anothe
 
 ### Connection problems
 
-- Some strict networks (certain corporate, school or mobile networks) block direct browser-to-browser connections. Fixing that requires a TURN relay server, which this project does not include.
+- Some networks (mobile data, many office, school and public networks, some routers and VPNs) block direct browser-to-browser connections. The debug log then shows `could not connect to peer … after exchanging SDP`. The fix is a TURN relay; see below.
 - Trystero occasionally leaves a connection half-open: one side thinks it's connected, the other doesn't. The page detects this, because a healthy peer always sends something straight away, and reconnects by itself.
 - If nothing happens for 15 seconds, the page offers a **Reconnect** button. Reloading the page works too, since the game is saved.
 - To see what's going on, add `?debug` to the page URL (for example `…/index.html?debug#room=…`) and open the browser console. It logs peers connecting, messages and errors.
 
 Trystero is bundled in `vendor/trystero-nostr.mjs` rather than loaded from a CDN, and only loads when you choose online play.
+
+## TURN relay (optional)
+
+When two browsers can't reach each other directly, a TURN server relays their traffic, still encrypted end to end. This project can use [Cloudflare's TURN service](https://developers.cloudflare.com/realtime/turn/). Cloudflare issues short-lived credentials from a secret API token, so a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) in `worker/` creates them. The token is stored in Cloudflare, never in this repository, so the repository can stay public.
+
+Without it, the game works exactly as before: direct connections only. If the Worker can't be reached, the page waits at most 5 seconds and then connects without TURN.
+
+### Setup
+
+You need a Cloudflare TURN key: its **key ID** and **API token**, from the Cloudflare dashboard under Realtime → TURN.
+
+1. Install the Worker's tools and log in to Cloudflare:
+   ```sh
+   cd worker
+   npm install
+   npx wrangler login
+   ```
+2. In `worker/wrangler.toml`, check that `ALLOWED_ORIGINS` lists the address your game is served from: scheme and host only, no path. For example, `https://mlindwal.github.io` for GitHub Pages.
+3. Store the secrets in Cloudflare. Each command prompts for the value:
+   ```sh
+   npx wrangler secret put TURN_KEY_ID
+   npx wrangler secret put TURN_KEY_API_TOKEN
+   ```
+4. Deploy, and note the URL it prints (like `https://reversi-turn.<your-subdomain>.workers.dev`):
+   ```sh
+   npx wrangler deploy
+   ```
+5. Put that URL in `TURN_CREDENTIALS_URL` near the top of `online.js`, then commit and publish the page. The URL isn't secret.
+
+To check it works, open the game with `?debug` and choose Online. The console should say `joining room … with TURN`.
+
+To run the Worker locally, copy `worker/.dev.vars.example` to `worker/.dev.vars` (git ignores it), fill in the values, and run `npx wrangler dev`.
+
+### How the Worker limits misuse
+
+The Worker's URL is public, since every player's browser calls it. To limit misuse:
+
+- It only answers requests whose `Origin` is in `ALLOWED_ORIGINS`. That stops other websites from using it through their visitors' browsers; a script can fake the header, so it's a speed bump, not a lock.
+- It allows 10 requests per minute per IP address.
+- Credentials expire after 2 hours (`CREDENTIAL_TTL`), so harvested ones stop working quickly.
+
+TURN is only used when a direct connection fails, and a game sends very little data. Still, set up usage alerts in your Cloudflare account, so any abuse is noticed before it costs anything. If you suspect the API token has leaked, create a new one in the dashboard and run `npx wrangler secret put TURN_KEY_API_TOKEN` again.
 
 ## Files
 
@@ -66,12 +108,13 @@ Trystero is bundled in `vendor/trystero-nostr.mjs` rather than loaded from a CDN
 | `ui.js` | Board rendering, modes, saved games, seats and input handling |
 | `online.js` | Online play: connecting through Trystero, finding free seats, and deciding whether to accept another player's game |
 | `vendor/trystero-nostr.mjs` | Bundled Trystero library (generated, do not edit) |
-| `test/*.test.js` | Tests for the rules, notation and online sync |
+| `worker/` | Optional Cloudflare Worker that hands out TURN credentials |
+| `test/*.test.js` | Tests for the rules, notation, online sync and the Worker |
 
 ## Development
 
 ```sh
-npm test         # Node's built-in test runner, Node 18+; no install needed
+npm test         # Node's built-in test runner, Node 18+; no install needed (also tests the Worker)
 npm install      # only needed to regenerate the bundled library
 npm run vendor   # rebuilds vendor/trystero-nostr.mjs from package.json versions
 ```
