@@ -1,0 +1,14 @@
+{
+  "name": "reversi-turn",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that hands out short-lived TURN credentials to the Reversi page",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.148.0"
+  }
+}

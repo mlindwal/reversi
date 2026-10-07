@@ -82,6 +82,76 @@ button:disabled {
   cursor: default;
 }
 
+.panel {
+  width: 100%;
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+}
+
+.panel[hidden],
+.panel [hidden] {
+  display: none;
+}
+
+.panel p {
+  margin: 4px 0 8px;
+}
+
+.panel-status.error {
+  color: #ff9b8a;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.panel-actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+.panel-actions button {
+  margin-bottom: 8px;
+}
+
+.resume-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resume-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resume-list span {
+  flex: 1;
+  color: var(--muted);
+}
+
+.share-row {
+  display: flex;
+  gap: 8px;
+}
+
+.share-row input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid #3d5046;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
 .scoreboard {
   display: flex;
   gap: 12px;

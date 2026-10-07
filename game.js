@@ -115,6 +115,79 @@
       getValidMoves(board, WHITE).length === 0;
   }
 
+  // Works out whose turn it is after `justMoved` has played. If the opponent
+  // has no legal move they pass and `justMoved` goes again.
+  function nextTurn(board, justMoved) {
+    var other = opponent(justMoved);
+    if (getValidMoves(board, other).length > 0) {
+      return { current: other, passed: null, gameOver: false };
+    }
+    if (getValidMoves(board, justMoved).length > 0) {
+      return { current: justMoved, passed: other, gameOver: false };
+    }
+    return { current: other, passed: null, gameOver: true };
+  }
+
+  // ---- Move notation ---------------------------------------------------
+  // Squares are written as a column letter and a row number ("d3"), with
+  // a1 in the top-left corner. A game is the concatenated list of moves;
+  // passes are implied because they are forced.
+
+  var FILES = 'abcdefgh';
+
+  function toNotation(row, col) {
+    return FILES.charAt(col) + (row + 1);
+  }
+
+  function fromNotation(move) {
+    if (!/^[a-h][1-8]$/.test(move)) return null;
+    return { row: Number(move.charAt(1)) - 1, col: FILES.indexOf(move.charAt(0)) };
+  }
+
+  // Splits "d3c5f6" into ["d3", "c5", "f6"]. Returns null if malformed.
+  function decodeMoves(text) {
+    if (!/^([a-h][1-8])*$/.test(text)) return null;
+    return text.match(/../g) || [];
+  }
+
+  function encodeMoves(moves) {
+    return moves.join('');
+  }
+
+  // Plays a list of moves from the opening position. Stops at the first
+  // illegal move and reports it in `error`; `moves` holds the legal prefix.
+  function replay(moves) {
+    var game = {
+      board: createBoard(),
+      current: BLACK,
+      gameOver: false,
+      passed: null,
+      lastMove: null,
+      flipped: [],
+      moves: [],
+      players: [], // who played each move
+      error: null
+    };
+    for (var i = 0; i < moves.length; i++) {
+      var square = fromNotation(moves[i]);
+      var flipped = square && !game.gameOver &&
+        applyMove(game.board, square.row, square.col, game.current);
+      if (!flipped) {
+        game.error = 'Move ' + (i + 1) + ' (' + moves[i] + ') is not legal.';
+        break;
+      }
+      game.moves.push(moves[i]);
+      game.players.push(game.current);
+      game.lastMove = square;
+      game.flipped = flipped;
+      var turn = nextTurn(game.board, game.current);
+      game.current = turn.current;
+      game.passed = turn.passed;
+      game.gameOver = turn.gameOver;
+    }
+    return game;
+  }
+
   // ---- Computer player -------------------------------------------------
 
   function evaluate(board, player) {
@@ -190,6 +263,12 @@
     applyMove: applyMove,
     countDiscs: countDiscs,
     isGameOver: isGameOver,
+    nextTurn: nextTurn,
+    toNotation: toNotation,
+    fromNotation: fromNotation,
+    decodeMoves: decodeMoves,
+    encodeMoves: encodeMoves,
+    replay: replay,
     chooseMove: chooseMove
   };
 

@@ -1,0 +1,30 @@
+# Cloudflare Worker that hands out short-lived TURN credentials to the game.
+# Setup steps are in the main README ("TURN relay"). Secrets are never stored
+# here; set them with `npx wrangler secret put TURN_KEY_ID` and
+# `npx wrangler secret put TURN_KEY_API_TOKEN`.
+
+name = "reversi-turn"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Serve the Worker on its own subdomain; `wrangler deploy` sets this up. The
+# lindwall.dev domain must be in the same Cloudflare account. The game reads
+# this address from TURN_CREDENTIALS_URL in online.js.
+routes = [
+  { pattern = "turn.reversi.lindwall.dev", custom_domain = true }
+]
+
+[vars]
+# Pages allowed to ask for credentials (comma-separated origins: scheme, host
+# and port). Browsers never send the path, so an origin covers every page on
+# that host. localhost is for testing with `python3 -m http.server`.
+ALLOWED_ORIGINS = "https://lindwall.info,https://reversi.lindwall.dev,https://mlindwal.github.io,http://localhost:8000"
+# How long credentials stay valid, in seconds.
+CREDENTIAL_TTL = "7200"
+
+# At most 10 requests per minute from one IP address. namespace_id is any
+# number unique among the rate limiters in your Cloudflare account.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }

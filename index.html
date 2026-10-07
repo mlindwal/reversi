@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Reversi</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f7a4a'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%23111'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,8 +15,9 @@
       <label>
         Opponent
         <select id="mode">
-          <option value="human">Human (same device)</option>
           <option value="cpu" selected>Computer</option>
+          <option value="human">Human (same device)</option>
+          <option value="online">Online</option>
         </select>
       </label>
       <label id="difficulty-label">
@@ -34,15 +36,37 @@
       <button id="undo" type="button">Undo</button>
     </section>
 
+    <section class="panel" id="online-panel" hidden>
+      <p class="panel-status" id="online-status"></p>
+      <div class="panel-actions">
+        <button type="button" id="take-seat" hidden>Take the seat</button>
+        <button type="button" id="use-theirs" hidden>Use their version</button>
+        <button type="button" id="reconnect" hidden>Reconnect</button>
+      </div>
+      <div id="invite">
+        <p id="invite-text"></p>
+        <div class="share-row">
+          <input type="text" id="invite-url" readonly aria-label="Game link">
+          <button type="button" class="copy" data-target="invite-url">Copy</button>
+          <button type="button" class="share" data-target="invite-url" hidden>Share</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="resume-panel" hidden>
+      <p>Online games you can go back to:</p>
+      <ul class="resume-list" id="resume-list"></ul>
+    </section>
+
     <section class="scoreboard">
       <div class="score black" id="score-black">
         <span class="disc-icon"></span>
-        <span class="name">Black</span>
+        <span class="name" id="name-black">Black</span>
         <span class="count" id="count-black">2</span>
       </div>
       <div class="score white" id="score-white">
         <span class="disc-icon"></span>
-        <span class="name">White</span>
+        <span class="name" id="name-white">White</span>
         <span class="count" id="count-white">2</span>
       </div>
     </section>
@@ -63,10 +87,15 @@
           player can move.</li>
         <li>The player with the most discs at the end wins.</li>
       </ul>
+      <p><strong>Online:</strong> send the game link to a friend and play in real time.
+        Moves go directly between your browsers. Anyone else who opens the link can
+        watch. If you close the tab, open the link again (or use Resume on the start
+        page) to carry on.</p>
     </details>
   </main>
 
   <script src="game.js"></script>
+  <script src="online.js"></script>
   <script src="ui.js"></script>
 </body>
 </html>
