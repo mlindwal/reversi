@@ -69,6 +69,18 @@ test('returns credentials from the Cloudflare TURN API', async () => {
   assert.ok(!JSON.stringify(body).includes('secret-token'));
 });
 
+test('matches configured origins regardless of case or a trailing slash', async () => {
+  const config = env({ ALLOWED_ORIGINS: 'https://Lindwall.info/, https://reversi.lindwall.dev' });
+  for (const origin of ['https://lindwall.info', 'https://reversi.lindwall.dev']) {
+    const response = await worker.fetch(request({ Origin: origin }), config);
+    assert.strictEqual(response.status, 200, origin);
+    assert.strictEqual(response.headers.get('Access-Control-Allow-Origin'), origin);
+  }
+  for (const origin of ['http://lindwall.info', 'https://www.lindwall.info', 'https://lindwall.dev']) {
+    assert.strictEqual((await worker.fetch(request({ Origin: origin }), config)).status, 403, origin);
+  }
+});
+
 test('refuses origins that are not allowed, and requests without one', async () => {
   for (const headers of [{ Origin: 'https://evil.example' }, {}]) {
     const response = await worker.fetch(request(headers), env());

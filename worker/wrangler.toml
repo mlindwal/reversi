@@ -9,8 +9,9 @@ compatibility_date = "2026-10-01"
 
 [vars]
 # Pages allowed to ask for credentials (comma-separated origins: scheme, host
-# and port, no path). localhost is for testing with `python3 -m http.server`.
-ALLOWED_ORIGINS = "https://mlindwal.github.io,http://localhost:8000"
+# and port). Browsers never send the path, so an origin covers every page on
+# that host. localhost is for testing with `python3 -m http.server`.
+ALLOWED_ORIGINS = "https://lindwall.info,https://reversi.lindwall.dev,https://mlindwal.github.io,http://localhost:8000"
 # How long credentials stay valid, in seconds.
 CREDENTIAL_TTL = "7200"
 

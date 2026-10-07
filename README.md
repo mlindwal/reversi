@@ -72,7 +72,7 @@ You need a Cloudflare TURN key: its **key ID** and **API token**, from the Cloud
    npm install
    npx wrangler login
    ```
-2. In `worker/wrangler.toml`, check that `ALLOWED_ORIGINS` lists the address your game is served from: scheme and host only, no path. For example, `https://mlindwal.github.io` for GitHub Pages.
+2. In `worker/wrangler.toml`, check that `ALLOWED_ORIGINS` lists every address your game is served from: scheme and host only, no path. It currently allows `https://lindwall.info`, `https://reversi.lindwall.dev`, `https://mlindwal.github.io` (GitHub Pages) and `http://localhost:8000` (local testing). An origin covers every page on that host; for example, `https://lindwall.info` also covers `https://lindwall.info/reversi`.
 3. Store the secrets in Cloudflare. Each command prompts for the value:
    ```sh
    npx wrangler secret put TURN_KEY_ID

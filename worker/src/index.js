@@ -80,10 +80,12 @@ export default {
   }
 };
 
+// Browsers send the Origin header with a lowercase host and no trailing
+// slash, so normalize the configured list the same way.
 function allowedOrigins(env) {
   return String(env.ALLOWED_ORIGINS || '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => origin.trim().toLowerCase().replace(/\/+$/, ''))
     .filter(Boolean);
 }
 
