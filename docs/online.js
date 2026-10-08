@@ -2,6 +2,8 @@
 // relays (via the bundled Trystero library); data then travels directly
 // between browsers. When a TURN credentials URL is set below, browsers that
 // can't reach each other directly relay through Cloudflare's TURN servers.
+// All STUN and TURN servers are Cloudflare's; Trystero's defaults (which
+// include Google's public STUN servers) are not used.
 //
 // Everyone in a room repeatedly announces
 //   { side: 'b' | 'w' | null, g: game number, moves: "d3c5...", opponent: bool }
@@ -20,6 +22,9 @@
   // README). Set to '' to play without TURN: direct connections only.
   var TURN_CREDENTIALS_URL = 'https://turn.reversi.lindwall.dev/';
   var TURN_FETCH_TIMEOUT_MS = 5000;
+  // Cloudflare's public STUN server, which lets browsers find their public
+  // address. Always used, so connecting works even without the Worker.
+  var STUN_SERVERS = [{ urls: 'stun:stun.cloudflare.com:3478' }];
   var MAX_MOVES_LENGTH = 120; // 60 moves of two characters
   var SILENT_PEER_MS = 8000;
   // Trystero finishes leaving a room asynchronously, and that cleanup
@@ -263,9 +268,11 @@
 
       function join() {
         debug('joining room', roomId, 'as peer', trystero.selfId, turnServers ? 'with TURN' : 'without TURN');
-        var config = { appId: APP_ID };
-        // Trystero uses these alongside its default STUN servers.
-        if (turnServers) config.turnConfig = turnServers;
+        // rtcConfig.iceServers replaces Trystero's default server list.
+        var config = {
+          appId: APP_ID,
+          rtcConfig: { iceServers: STUN_SERVERS.concat(turnServers || []) }
+        };
         var thisRoom = trystero.joinRoom(config, roomId, { onJoinError: onJoinError });
         var action = thisRoom.makeAction('sync');
         room = thisRoom;

@@ -32,6 +32,7 @@ It also needs a secure page (`https://`, or `http://localhost` for testing), bec
 The browsers connect directly to each other with WebRTC, using the [Trystero](https://github.com/dmotz/trystero) library.
 
 - To find each other, they post short, encrypted connection messages on public [Nostr](https://nostr.com/) relays, which are servers run by other people. After that, everything travels directly between the browsers.
+- To discover their public address, browsers use Cloudflare's STUN server (`stun.cloudflare.com`), plus the TURN servers below when set up. No other STUN servers are contacted; Trystero's defaults, which include Google's, are turned off.
 - The game link only holds the room ID. Every player keeps the moves and sends the whole move list to the others after each change, so anyone who reconnects catches up.
 
 ### Coming back to a game
