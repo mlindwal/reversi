@@ -1,11 +1,25 @@
-// Deploys the game itself as the "reversi" Cloudflare Worker: only the files
-// in docs/ are published. GitHub Pages publishes the same folder. The TURN
-// credentials Worker ("reversi-turn") has its own configuration in worker/.
+// The "reversi" Cloudflare Worker: serves the game (the files in docs/) on
+// reversi.lindwall.dev, and runs online games (server/) with one Durable
+// Object per game room. GitHub Pages publishes the same docs/ folder; that
+// copy connects to this Worker for online games.
 {
   "name": "reversi",
+  "main": "server/index.js",
   "compatibility_date": "2026-10-01",
   "assets": {
     "directory": "./docs"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  "migrations": [
+    // SQLite-backed storage, which Durable Objects on the free plan require.
+    { "tag": "v1", "new_sqlite_classes": ["Room"] }
+  ],
+  "vars": {
+    // Other sites whose copy of the game may connect, besides this Worker's
+    // own address (comma-separated origins: scheme and host, no path).
+    "ALLOWED_ORIGINS": "https://lindwall.info,https://mlindwal.github.io"
   },
   "routes": [
     { "pattern": "reversi.lindwall.dev", "custom_domain": true }
