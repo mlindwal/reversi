@@ -2,13 +2,13 @@
   "name": "reversi",
   "version": "1.0.0",
   "private": true,
-  "description": "Reversi in plain JavaScript and HTML",
+  "description": "Reversi in plain JavaScript and HTML, with online play on Cloudflare",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "vendor": "esbuild tools/trystero-entry.mjs --bundle --format=esm --minify --target=es2020 --legal-comments=inline --outfile=docs/vendor/trystero-nostr.mjs"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "@trystero-p2p/nostr": "0.25.4",
-    "esbuild": "^0.25.12"
+    "wrangler": "^4.148.0"
   }
 }

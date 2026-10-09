@@ -1,13 +1,16 @@
 # Reversi
 
-A playable Reversi (Othello) game written in plain JavaScript, HTML and CSS. There is no build step and no backend.
+A playable Reversi (Othello) game written in plain JavaScript, HTML and CSS, with no build step. Online games run on a small Cloudflare Worker.
 
 ## Play
 
-The game is the `docs/` folder. Open `docs/index.html` in a browser for computer or same-device games. Online play needs the page served from a web server:
+The game is the `docs/` folder. Open `docs/index.html` in a browser for computer or same-device games.
+
+To run everything locally, online play included:
 
 ```sh
-python3 -m http.server 8000 --directory docs   # then visit http://localhost:8000
+npm install
+npm run dev     # then visit http://localhost:8787
 ```
 
 Opponents:
@@ -20,89 +23,44 @@ Also: move hints (can be turned off), automatic passes, undo (not in online game
 
 ## Hosting
 
-Online play needs the page at a public URL so your opponent can open it. Any static host that serves the `docs/` folder works. This repository is set up for two:
+The `reversi` Cloudflare Worker, configured in `wrangler.jsonc`, does two jobs: it serves the game from `docs/` on reversi.lindwall.dev, and it runs online games (`server/`). Only the `docs/` folder is published as files.
 
-- **GitHub Pages** (lindwall.info/reversi): in the repository's **Settings → Pages**, choose "Deploy from a branch", then the default branch and the `/docs` folder.
-- **Cloudflare** (reversi.lindwall.dev): `wrangler.jsonc` in the repository root deploys `docs/` as the `reversi` Worker on that domain, publishing only that folder. In the Worker's build settings, leave the root directory as the repository root; the deploy command is `npx wrangler deploy`.
+- **Cloudflare** (reversi.lindwall.dev): in the Worker's build settings, leave the root directory as the repository root; the deploy command is `npx wrangler deploy`. To deploy from your own machine, run `npm install`, `npx wrangler login` and `npm run deploy`.
+- **GitHub Pages** (lindwall.info/reversi): in the repository's **Settings → Pages**, choose "Deploy from a branch", then the default branch and the `/docs` folder. This copy connects to reversi.lindwall.dev for online games.
 
-It also needs a secure page (`https://`, or `http://localhost` for testing), because browsers only allow the encryption it uses there.
+The game server's address is `SERVER_URL` near the top of `docs/online.js`. Pages served from that address, or from `localhost`, use their own address instead.
 
-## How online play works without a backend
+## How online play works
 
-The browsers connect directly to each other with WebRTC, using the [Trystero](https://github.com/dmotz/trystero) library.
+Each browser opens a WebSocket to the Worker at `/rooms/<room id>`. Every room is a [Durable Object](https://developers.cloudflare.com/durable-objects/), a small piece of Cloudflare that keeps one game:
 
-- To find each other, they post short, encrypted connection messages on public [Nostr](https://nostr.com/) relays, which are servers run by other people. After that, everything travels directly between the browsers.
-- The game link only holds the room ID. Every player keeps the moves and sends the whole move list to the others after each change, so anyone who reconnects catches up.
+- **It stores the game:** the moves, the game number (raised by **New game**) and who holds each seat. The game survives everyone closing their tabs. A room is deleted once nothing has happened in it (no moves, new games or seat changes) for 30 days and nobody is connected.
+- **It checks every move** with the same rules (`docs/game.js`) the page uses. Only the player whose turn it is can move, and illegal moves are refused.
+- **It assigns seats:** the first person in a room plays Black, the next White, and everyone else watches.
+- **It sends the full game to everyone in the room after every change.**
 
-### Coming back to a game
+The message format is described at the top of `server/index.js`.
 
-Each browser saves its online games (room, colour and moves) in local storage for 30 days.
+### Seats and coming back to a game
+
+Taking a seat gives your browser a secret token, saved in local storage for 30 days. The server keeps only a hash of it. The token is what puts you back in your seat:
 
 - **Same browser:** open the game link again, or use **Resume** on the start page, which lists recent online games.
-- **Another device or a private window:** open the game link. If your seat is free, you take it and the game is copied from your opponent. While you're away, anyone watching sees a **Play as …** button for your seat (it is never taken automatically), so it's best to come back promptly.
+- **Another device or a private window:** open the game link, and you'll be watching. If your seat's player isn't connected, a **Play as …** button lets you take the seat; the old browser's token then stops working. Anyone watching sees the same button while a player is away, so it's best to come back promptly.
 - **Two tabs in one browser:** each tab gets its own seat, so you can test a game against yourself.
-
-Your opponent must have the game open for you to reconnect. Nothing is stored on a server, so if both players lose their saved copies, the game is gone.
-
-### Fair play
-
-Each browser checks every move it receives against the rules, and refuses moves that would be made on its player's behalf.
-
-If your saved copy is out of date (for example, you continued the game on another device), the page says your copies don't match and offers **Use their version**. If you rejoin without a saved copy, you accept your opponent's version of the game, so in that one case you rely on their honesty.
 
 ### Connection problems
 
-- Some networks (mobile data, many office, school and public networks, some routers and VPNs) block direct browser-to-browser connections. The debug log then shows `could not connect to peer … after exchanging SDP`. The fix is a TURN relay; see below.
-- Trystero occasionally leaves a connection half-open: one side thinks it's connected, the other doesn't. The page detects this, because a healthy peer always sends something straight away, and reconnects by itself.
-- If nothing happens for 15 seconds, the page offers a **Reconnect** button. Reloading the page works too, since the game is saved.
-- To see what's going on, add `?debug` to the page URL (for example `…/index.html?debug#room=…`) and open the browser console. It logs peers connecting, messages and errors.
+- If the connection drops, the page says so and reconnects by itself, with growing delays up to 15 seconds. It reconnects straight away when the network or the tab comes back. Every 25 seconds it checks that the connection is still alive.
+- To see what's going on, add `?debug` to the page URL (for example `…/?debug#room=…`) and open the browser console. It logs connecting, messages and disconnects.
 
-Trystero is bundled in `docs/vendor/trystero-nostr.mjs` rather than loaded from a CDN, and only loads when you choose online play.
+### How the server limits misuse
 
-## TURN relay (optional)
+- WebSocket connections are only accepted from the Worker's own address and from the sites in `ALLOWED_ORIGINS` (`wrangler.jsonc`). That stops other websites from using the server through their visitors' browsers; a script can fake the header, so it's a speed bump, not a lock.
+- Each room accepts at most 20 connections, messages of at most 1 KB, and 30 messages per connection per 10 seconds.
+- Room IDs are 10 random characters, and seat tokens 128 random bits.
 
-When two browsers can't reach each other directly, a TURN server relays their traffic, still encrypted end to end. This project can use [Cloudflare's TURN service](https://developers.cloudflare.com/realtime/turn/). Cloudflare issues short-lived credentials from a secret API token, so a small [Cloudflare Worker](https://developers.cloudflare.com/workers/) in `worker/` creates them. The token is stored in Cloudflare, never in this repository, so the repository can stay public.
-
-Without TURN, the game uses direct connections only. If the Worker can't be reached, the page waits at most 5 seconds and then connects without TURN.
-
-### Setup
-
-You need a Cloudflare TURN key: its **key ID** and **API token**, from the Cloudflare dashboard under Realtime → TURN.
-
-1. Install the Worker's tools and log in to Cloudflare:
-   ```sh
-   cd worker
-   npm install
-   npx wrangler login
-   ```
-2. In `worker/wrangler.toml`, check that `ALLOWED_ORIGINS` lists every address your game is served from: scheme and host only, no path. It currently allows `https://lindwall.info`, `https://reversi.lindwall.dev`, `https://mlindwal.github.io` (GitHub Pages) and `http://localhost:8000` (local testing). An origin covers every page on that host; for example, `https://lindwall.info` also covers `https://lindwall.info/reversi`.
-3. Store the secrets in Cloudflare. Each command prompts for the value:
-   ```sh
-   npx wrangler secret put TURN_KEY_ID
-   npx wrangler secret put TURN_KEY_API_TOKEN
-   ```
-4. Deploy:
-   ```sh
-   npx wrangler deploy
-   ```
-   This serves the Worker at `https://turn.reversi.lindwall.dev`, set by `routes` in `worker/wrangler.toml`; the `lindwall.dev` domain must be in the same Cloudflare account. To use a different address, change `routes` there.
-5. The game asks for credentials at the address in `TURN_CREDENTIALS_URL`, near the top of `docs/online.js`. It's set to `https://turn.reversi.lindwall.dev/`, so it only needs changing if the Worker lives elsewhere. Set it to `''` to turn TURN off. The URL isn't secret.
-
-To deploy `reversi-turn` automatically from GitHub instead, connect it to this repository in Cloudflare. In its build settings, set the root directory to `worker` and the production branch to `main`, and turn off builds for other branches.
-
-To check it works, open the game with `?debug` and choose Online. The console should say `joining room … with TURN`.
-
-To run the Worker locally, copy `worker/.dev.vars.example` to `worker/.dev.vars` (git ignores it), fill in the values, and run `npx wrangler dev`.
-
-### How the Worker limits misuse
-
-The Worker's URL is public, since every player's browser calls it. To limit misuse:
-
-- It only answers requests whose `Origin` is in `ALLOWED_ORIGINS`. That stops other websites from using it through their visitors' browsers; a script can fake the header, so it's a speed bump, not a lock.
-- It allows 10 requests per minute per IP address.
-- Credentials expire after 2 hours (`CREDENTIAL_TTL`), so harvested ones stop working quickly.
-
-TURN is only used when a direct connection fails, and a game sends very little data. Still, set up usage alerts in your Cloudflare account, so any abuse is noticed before it costs anything. If you suspect the API token has leaked, create a new one in the dashboard and run `npx wrangler secret put TURN_KEY_API_TOKEN` again.
+A game is a few dozen small messages, and idle rooms sleep without costing anything (Cloudflare's WebSocket hibernation). Still, set up usage alerts in your Cloudflare account, so any abuse is noticed before it costs anything.
 
 ## Files
 
@@ -111,19 +69,19 @@ TURN is only used when a direct connection fails, and a game sends very little d
 | `docs/` | The game: everything in it is published, nothing else |
 | `docs/index.html` | Page layout |
 | `docs/style.css` | Styling |
-| `docs/game.js` | Game rules, move notation, replaying a move list, and the computer player (no DOM; also loadable in Node) |
+| `docs/game.js` | Game rules, move notation, replaying a move list, and the computer player (no DOM; also used by the server) |
 | `docs/ui.js` | Board rendering, modes, saved games, seats and input handling |
-| `docs/online.js` | Online play: connecting through Trystero, finding free seats, and deciding whether to accept another player's game |
-| `docs/vendor/trystero-nostr.mjs` | Bundled Trystero library (generated, do not edit) |
-| `wrangler.jsonc` | Cloudflare config for the game (the `reversi` Worker) |
-| `worker/` | Optional Cloudflare Worker (`reversi-turn`) that hands out TURN credentials |
-| `tools/trystero-entry.mjs` | Entry point for bundling Trystero |
-| `test/*.test.js` | Tests for the rules, notation, online sync and the Worker |
+| `docs/online.js` | Online play: the WebSocket connection to the server |
+| `server/index.js` | The Worker and the `Room` Durable Object: connections, storage, limits |
+| `server/logic.js` | Room rules: seats, moves and new games (no Cloudflare APIs; tested in Node) |
+| `wrangler.jsonc` | Cloudflare config for the `reversi` Worker |
+| `test/*.test.js` | Tests for the rules and the room logic |
 
 ## Development
 
 ```sh
-npm test         # Node's built-in test runner, Node 18+; no install needed (also tests the Worker)
-npm install      # only needed to regenerate the bundled library
-npm run vendor   # rebuilds docs/vendor/trystero-nostr.mjs from package.json versions
+npm test         # Node's built-in test runner, Node 18+; no install needed
+npm install      # installs wrangler, for the two commands below
+npm run dev      # runs the Worker locally on http://localhost:8787, game state included
+npm run deploy   # deploys the reversi Worker
 ```
