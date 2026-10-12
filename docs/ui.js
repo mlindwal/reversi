@@ -2,15 +2,14 @@
 // (window.ReversiOnline).
 //
 // The game is stored as its list of moves ("d3", "c5", ...) and the board is
-// rebuilt from it with Reversi.replay(). Online players exchange that list,
-// and it is saved in the browser so a live game can be resumed.
+// rebuilt from it with Reversi.replay(). In online games the server keeps the
+// game and sends that list after every change.
 (function () {
   'use strict';
 
   var R = window.Reversi;
   var Online = window.ReversiOnline;
   var CPU_DELAY_MS = 450;
-  var STALLED_MS = 15000; // offer to reconnect after waiting this long
   var HUMAN_COLOR = R.BLACK; // In computer mode the human plays black.
 
   var boardEl = document.getElementById('board');
@@ -30,8 +29,6 @@
   var onlinePanelEl = document.getElementById('online-panel');
   var onlineStatusEl = document.getElementById('online-status');
   var takeSeatBtn = document.getElementById('take-seat');
-  var useTheirsBtn = document.getElementById('use-theirs');
-  var reconnectBtn = document.getElementById('reconnect');
   var inviteEl = document.getElementById('invite');
   var inviteTextEl = document.getElementById('invite-text');
   var inviteUrlEl = document.getElementById('invite-url');
@@ -45,15 +42,15 @@
   var notice = '';     // one-off message shown in the status line
   var cells = [];
   var cpuTimer = null;
-  var stalledTimer = null;
 
-  // The live game, or null when not in a room. Fields:
-  //   roomId, side (R.BLACK / R.WHITE, or null without a seat), g (game
-  //   number, raised by "New game"), role ('joining' until we know whether a
-  //   seat is free, then 'player' or 'spectator'), status (connection state),
-  //   clash, trouble (connection warning), conflict, openSeat, error,
-  //   connection, release (frees the seat lock), claiming, phase and
-  //   phaseSince (how long we've been in the current role/status).
+  // The online game, or null when not in a room. Fields:
+  //   roomId; side (R.BLACK / R.WHITE, or null when watching); token (the
+  //   secret that proves our seat to the server); tokenSide (the seat that
+  //   token was saved for); status ('connecting', 'connected', 'reconnecting'
+  //   or 'error'); seats (from the server: who is seated and online); g (game
+  //   number); synced (a state has arrived); pending (a move or request is
+  //   waiting for the server); startedNewGame; error; connection; release
+  //   and lockedSide (this tab's seat lock).
   var online = null;
 
   // ---- Helpers ---------------------------------------------------------
@@ -84,7 +81,10 @@
 
   function canMoveHere() {
     if (game.gameOver) return false;
-    if (mode === 'online') return online.side !== null && game.current === online.side;
+    if (mode === 'online') {
+      return online.side !== null && online.status === 'connected' && online.synced &&
+        !online.pending && game.current === online.side;
+    }
     var mine = localColor();
     return mine === null || game.current === mine;
   }
@@ -98,18 +98,23 @@
     game = R.replay(moves);
   }
 
-  // ---- Saved live games ------------------------------------------------
-  // localStorage keeps, per room, the seats this browser has played and the
-  // latest game, so a closed tab can be resumed. sessionStorage remembers
-  // which seat this particular tab had, so a reload keeps the same seat when
-  // two tabs of the browser play each other.
+  // ---- Saved online games ----------------------------------------------
+  // localStorage keeps, per room, the seat tokens this browser holds and the
+  // latest moves (for the Resume list), so a closed tab can rejoin its seat.
+  // sessionStorage remembers which seat this particular tab had, so a reload
+  // keeps the same seat when two tabs of the browser play each other.
 
-  var STORAGE_KEY = 'reversi:rooms';
+  var STORAGE_KEY = 'reversi:games';
   var MAX_SAVED_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+  var TOKEN_PATTERN = /^[0-9a-f]{32}$/;
 
   function isSavedGame(entry) {
-    return !!entry && Array.isArray(entry.sides) && entry.sides.length > 0 &&
-      entry.sides.every(function (s) { return s === 'b' || s === 'w'; }) &&
+    if (!entry || !entry.tokens || typeof entry.tokens !== 'object') return false;
+    var codes = Object.keys(entry.tokens);
+    return codes.length > 0 &&
+      codes.every(function (code) {
+        return (code === 'b' || code === 'w') && TOKEN_PATTERN.test(entry.tokens[code]);
+      }) &&
       typeof entry.g === 'number' && typeof entry.updated === 'number' &&
       typeof entry.moves === 'string' && R.decodeMoves(entry.moves) !== null;
   }
@@ -137,11 +142,13 @@
     }
   }
 
+  // Saves our seat's token and the current game, while we hold a seat.
   function rememberGame(session) {
+    if (session.side === null || !session.token) return;
     var rooms = loadRooms();
-    var entry = rooms[session.roomId] || { sides: [] };
+    var entry = rooms[session.roomId] || { tokens: {} };
     var code = sideCode(session.side);
-    if (entry.sides.indexOf(code) === -1) entry.sides.push(code);
+    entry.tokens[code] = session.token;
     entry.g = session.g;
     entry.moves = R.encodeMoves(moves);
     entry.updated = Date.now();
@@ -152,6 +159,16 @@
     } catch (e) {
       // Only used to prefer the same seat after a reload.
     }
+  }
+
+  // Drops a token the server no longer accepts (its seat was taken over).
+  function forgetSeat(roomId, code) {
+    var rooms = loadRooms();
+    var entry = rooms[roomId];
+    if (!entry) return;
+    delete entry.tokens[code];
+    if (Object.keys(entry.tokens).length === 0) delete rooms[roomId];
+    saveRooms(rooms);
   }
 
   function forgetGame(roomId) {
@@ -224,16 +241,19 @@
     if (!canMoveHere()) return;
     var row = Number(event.currentTarget.dataset.row);
     var col = Number(event.currentTarget.dataset.col);
-    var next = R.replay(moves.concat(R.toNotation(row, col)));
+    var square = R.toNotation(row, col);
+    var next = R.replay(moves.concat(square));
     if (next.error) return;
+    notice = '';
+    if (mode === 'online') {
+      // The server checks the move and sends the new state to everyone.
+      online.pending = online.connection.send({ type: 'move', g: online.g, square: square });
+      render();
+      return;
+    }
     moves = next.moves;
     game = next;
     animate = true;
-    notice = '';
-    if (mode === 'online') {
-      rememberGame(online);
-      if (online.connection) online.connection.announce();
-    }
     render();
     scheduleCpu();
   }
@@ -258,7 +278,8 @@
   // creates a new room.
   function startMode(newMode) {
     if (newMode === 'online') {
-      openRoom(Online.createRoomId(), true);
+      // The first person in a new room gets Black.
+      openRoom(Online.createRoomId());
       return;
     }
     clearTimeout(cpuTimer);
@@ -277,12 +298,9 @@
       startMode(mode);
       return;
     }
-    if (online.role !== 'player') return;
-    online.g += 1;
-    setMoves([]);
-    notice = 'You started a new game.';
-    rememberGame(online);
-    if (online.connection) online.connection.announce();
+    if (online.side === null || online.pending) return;
+    online.startedNewGame = true;
+    online.pending = online.connection.send({ type: 'newGame' });
     render();
   }
 
@@ -308,32 +326,35 @@
 
   function leaveRoom() {
     if (!online) return;
-    if (online.connection) online.connection.leave();
+    if (online.connection) online.connection.close();
     if (online.release) online.release();
     online = null;
   }
 
-  function openRoom(roomId, isNew) {
+  function openRoom(roomId) {
     clearTimeout(cpuTimer);
     leaveRoom();
     mode = 'online';
     modeEl.value = mode;
     notice = '';
-    setMoves([]);
+    var saved = loadRooms()[roomId];
+    // Show the saved position until the server sends the current one.
+    setMoves(saved ? R.decodeMoves(saved.moves) || [] : []);
     var session = {
       roomId: roomId,
       side: null,
-      g: 0,
-      role: 'joining',
+      token: null,
+      tokenSide: null,
       status: 'connecting',
-      clash: false,
-      trouble: null,
-      conflict: null,
-      openSeat: null,
+      seats: null,
+      g: saved ? saved.g : 0,
+      synced: false,
+      pending: false,
+      startedNewGame: false,
       error: '',
       connection: null,
       release: null,
-      claiming: false
+      lockedSide: null
     };
     online = session;
     history.replaceState(null, '', '#room=' + roomId);
@@ -342,91 +363,25 @@
     if (location.protocol === 'file:') {
       session.status = 'error';
       session.error = 'Online play needs the page to be served from a web server ' +
-        '(for example GitHub Pages, or "python3 -m http.server" locally). ' +
-        'Opened as a file, the browser blocks it.';
+        '(for example "npm run dev" locally). Opened as a file, the browser blocks it.';
       render();
       return;
     }
 
-    // The creator plays Black. Otherwise use a seat this browser had before.
-    var saved = isNew ? { sides: ['b'], g: 0, moves: '' } : loadRooms()[roomId];
-    chooseSavedSeat(roomId, saved ? saved.sides : []).then(function (seat) {
+    // Use a seat this browser had before, unless another tab is using it.
+    chooseSavedSeat(roomId, saved ? Object.keys(saved.tokens) : []).then(function (seat) {
       if (online !== session) {
         if (seat) seat.release();
         return;
       }
       if (seat) {
-        var restored = R.replay(R.decodeMoves(saved.moves) || []);
-        takeSeat(session, seat.code, seat.release, saved.g, restored.moves);
+        session.token = saved.tokens[seat.code];
+        session.tokenSide = seat.code;
+        session.release = seat.release;
+        session.lockedSide = seat.code;
       }
       connectRoom(session);
     });
-  }
-
-  function takeSeat(session, code, release, g, list) {
-    session.side = colorFromCode(code);
-    session.release = release;
-    session.role = 'player';
-    session.openSeat = null;
-    session.g = g;
-    setMoves(list);
-    rememberGame(session);
-  }
-
-  // Takes a free seat, adopting the game from the player opposite. Used both
-  // by the first person to open an invite and by a player returning without
-  // a saved game (another device, a private window).
-  function claimSeat(session, seat) {
-    if (session.claiming) return;
-    var replayed = R.replay(R.decodeMoves(seat.state.moves) || []);
-    if (replayed.error) return;
-    session.claiming = true;
-    tryLock(session.roomId, seat.side).then(function (release) {
-      session.claiming = false;
-      if (online !== session || session.role === 'player') {
-        if (release) release();
-        return;
-      }
-      if (!release) {
-        session.role = 'spectator';
-        notice = 'Another tab in this browser is already playing ' +
-          colorName(colorFromCode(seat.side)) + '.';
-        render();
-        return;
-      }
-      var color = colorFromCode(seat.side);
-      takeSeat(session, seat.side, release, seat.state.g, replayed.moves);
-      session.status = 'waiting';
-      notice = replayed.players.indexOf(color) !== -1 ? 'Game restored from your opponent.' : '';
-      animate = true;
-      session.connection.announce();
-      render();
-    });
-  }
-
-  // For someone without a seat: take a free seat if this is our first look
-  // at the room, otherwise keep watching and offer the seat.
-  function updateSeats(session) {
-    var seat = session.connection.openSeat();
-    if (session.role === 'joining') {
-      if (seat) {
-        claimSeat(session, seat);
-        return;
-      }
-      if (session.connection.hasPlayers()) session.role = 'spectator';
-    }
-    session.openSeat = session.role === 'spectator' ? seat : null;
-    render();
-  }
-
-  function adopt(session, g, list) {
-    if (session.role === 'player' && g !== session.g) notice = 'Your opponent started a new game.';
-    else if (session.role === 'player') notice = '';
-    session.g = g;
-    setMoves(list);
-    animate = true;
-    if (session.role === 'player') rememberGame(session);
-    render();
   }
 
   function connectRoom(session) {
@@ -434,88 +389,97 @@
       return online === session;
     }
 
-    Online.connect(session.roomId, {
-      getState: function () {
-        return {
-          side: session.side === null ? null : sideCode(session.side),
-          g: session.g,
-          moves: current() ? R.encodeMoves(moves) : ''
-        };
+    session.connection = Online.connect(session.roomId, {
+      hello: function () {
+        return { type: 'hello', token: session.token };
       },
-      onConnect: function () {
+      onOpen: function () {
         if (!current()) return;
         session.status = 'connected';
         render();
       },
-      onDisconnect: function () {
+      onClose: function () {
         if (!current()) return;
-        session.status = 'disconnected';
+        session.status = 'reconnecting';
+        session.pending = false;
         render();
       },
-      onSideClash: function (active) {
-        if (!current()) return;
-        session.clash = active;
-        render();
-      },
-      onSync: function (data) {
-        if (!current()) return;
-        var result = Online.resolveSync({ g: session.g, moves: moves }, data,
-          R.opponent(session.side));
-        if (result.action === 'reject') {
-          session.conflict = { state: data, reason: result.reason };
-          render();
-          return;
-        }
-        if (session.conflict) {
-          session.conflict = null;
-          render();
-        }
-        if (result.action === 'adopt') adopt(session, result.g, result.moves);
-        else if (result.action === 'ahead' && session.connection) session.connection.announce();
-      },
-      onWatch: function (data) {
-        if (!current()) return;
-        var result = Online.resolveSync({ g: session.g, moves: moves }, data, null);
-        if (result.action === 'adopt') adopt(session, result.g, result.moves);
-      },
-      onPeersChanged: function () {
-        if (!current() || session.role === 'player' || !session.connection) return;
-        updateSeats(session);
-      },
-      onTrouble: function (message) {
-        if (!current()) return;
-        session.trouble = message;
-        render();
+      onMessage: function (message) {
+        if (current()) handleMessage(session, message);
       }
-    }).then(function (connection) {
-      if (!current()) {
-        connection.leave();
-        return;
-      }
-      session.connection = connection;
-      if (session.status === 'connecting') session.status = 'waiting';
-      render();
-    }, function () {
-      if (!current()) return;
-      session.status = 'error';
-      session.error = 'Could not load the online play library.';
-      render();
     });
   }
 
-  // Replaces our game with the opponent's after a conflict, when the player
-  // decides their copy is the right one (for example after playing on
-  // another device).
-  function useTheirVersion() {
-    if (!online || !online.conflict) return;
-    var state = online.conflict.state;
-    var replayed = R.replay(R.decodeMoves(state.moves) || []);
-    online.conflict = null;
-    if (!replayed.error) {
-      notice = '';
-      adopt(online, state.g, replayed.moves);
+  function handleMessage(session, message) {
+    if (message.type === 'welcome') {
+      if (message.side === 'b' || message.side === 'w') {
+        if (message.token) {
+          session.token = message.token;
+          session.tokenSide = message.side;
+        }
+        session.side = colorFromCode(message.side);
+        holdSeatLock(session, message.side);
+        rememberGame(session);
+      } else {
+        // Our token was refused: someone took over the seat on another device.
+        if (session.tokenSide) forgetSeat(session.roomId, session.tokenSide);
+        session.token = null;
+        session.tokenSide = null;
+        session.side = null;
+        if (session.release) session.release();
+        session.release = null;
+        session.lockedSide = null;
+      }
+      render();
+    } else if (message.type === 'state') {
+      var list = R.decodeMoves(typeof message.moves === 'string' ? message.moves : '');
+      if (!list || typeof message.g !== 'number' || !message.seats) return;
+      var newGame = session.synced && message.g > session.g;
+      var changed = message.g !== session.g || message.moves !== R.encodeMoves(moves);
+      if (newGame) {
+        notice = session.startedNewGame ? 'You started a new game.' : 'A new game has started.';
+      } else if (changed) {
+        notice = '';
+      }
+      if (changed) {
+        setMoves(list);
+        animate = true;
+      }
+      session.startedNewGame = false;
+      session.g = message.g;
+      session.seats = message.seats;
+      session.synced = true;
+      session.pending = false;
+      rememberGame(session);
+      render();
+    } else if (message.type === 'error') {
+      notice = String(message.message || 'Something went wrong.');
+      session.pending = false;
+      session.startedNewGame = false;
+      render();
     }
-    render();
+  }
+
+  function holdSeatLock(session, code) {
+    if (session.lockedSide === code) return;
+    if (session.release) session.release();
+    session.release = null;
+    session.lockedSide = code;
+    tryLock(session.roomId, code).then(function (release) {
+      if (online !== session || session.lockedSide !== code) {
+        if (release) release();
+        return;
+      }
+      session.release = release;
+    });
+  }
+
+  // A seat a watcher may take: one whose player isn't connected.
+  function seatOnOffer(session) {
+    if (session.side !== null || !session.seats) return null;
+    return ['b', 'w'].filter(function (code) {
+      return !session.seats[code].taken || !session.seats[code].online;
+    })[0] || null;
   }
 
   // ---- Rendering -------------------------------------------------------
@@ -575,7 +539,7 @@
 
     statusEl.textContent = statusText(counts);
     undoBtn.disabled = mode === 'online' || moves.length === 0;
-    newGameBtn.disabled = mode === 'online' && online.role !== 'player';
+    newGameBtn.disabled = mode === 'online' && (online.side === null || !online.synced);
     difficultyLabelEl.hidden = mode !== 'cpu';
     renderOnlinePanel();
     renderResumePanel();
@@ -616,71 +580,41 @@
   }
 
   function renderOnlinePanel() {
-    clearTimeout(stalledTimer);
     onlinePanelEl.hidden = mode !== 'online';
     if (mode !== 'online') return;
     var session = online;
+    var opponent = session.side === null ? null : R.opponent(session.side);
+    var opponentSeat = opponent !== null && session.seats ? session.seats[sideCode(opponent)] : null;
+    var offer = seatOnOffer(session);
     var text;
-
-    // Waiting to hear from the other player for a while usually means the
-    // connection is stuck; reconnecting fixes the rare broken one.
-    var phase = session.role + '/' + session.status;
-    if (phase !== session.phase) {
-      session.phase = phase;
-      session.phaseSince = Date.now();
-    }
-    var waiting = !!session.connection && session.status !== 'error' &&
-      (session.role === 'joining' || (session.role === 'player' && session.status !== 'connected'));
-    var waited = Date.now() - session.phaseSince;
-    var stalled = waiting && waited >= STALLED_MS;
-    if (waiting && !stalled) stalledTimer = setTimeout(render, STALLED_MS - waited + 50);
 
     if (session.status === 'error') {
       text = session.error;
-    } else if (session.status === 'connecting') {
+    } else if (session.status === 'reconnecting') {
+      text = 'Connection lost. Reconnecting…';
+    } else if (session.status === 'connecting' || !session.synced) {
       text = 'Connecting…';
-    } else if (session.role === 'joining') {
-      text = 'Looking for the players in this game… If nobody shows up, they may not ' +
-        'have the game open right now.';
-    } else if (session.role === 'spectator') {
+    } else if (session.side === null) {
       text = 'You\'re watching this game.';
-      if (session.openSeat) {
-        text += ' The ' + colorName(colorFromCode(session.openSeat.side)) + ' player isn\'t ' +
-          'here. If that\'s you, you can take the seat.';
+      if (offer) {
+        text += ' The ' + colorName(colorFromCode(offer)) + ' player isn\'t here. ' +
+          'If that\'s you, you can take the seat.';
       }
+    } else if (!opponentSeat.taken) {
+      text = 'Waiting for your opponent to open the link…';
+    } else if (!opponentSeat.online) {
+      text = 'Your opponent is offline. Waiting for them to come back…';
     } else {
-      text = {
-        waiting: 'Waiting for your opponent to open the link…',
-        connected: 'Connected to your opponent.',
-        disconnected: 'Your opponent disconnected. Waiting for them to come back…'
-      }[session.status];
-    }
-    if (stalled) text += ' Taking a while? Try reconnecting.';
-    if (session.trouble && session.status !== 'error') {
-      text += ' Having trouble connecting (' + session.trouble + '); still trying. ' +
-        'Some networks block direct browser-to-browser connections.';
-    }
-    if (session.clash && session.status !== 'error') {
-      text += ' Someone else in this game is also playing ' + colorName(session.side) +
-        '. If that isn\'t you in another browser, your opponent should open the game link.';
-    }
-    if (session.conflict) {
-      text += ' Your opponent\'s copy of the game doesn\'t match yours. ' +
-        session.conflict.reason;
+      text = 'Connected to your opponent.';
     }
     onlineStatusEl.textContent = text;
-    onlineStatusEl.classList.toggle('error',
-      session.status === 'error' || !!session.trouble || session.clash || !!session.conflict);
+    onlineStatusEl.classList.toggle('error', session.status === 'error');
 
-    takeSeatBtn.hidden = !(session.role === 'spectator' && session.openSeat);
-    if (session.openSeat) {
-      takeSeatBtn.textContent = 'Play as ' + colorName(colorFromCode(session.openSeat.side));
-    }
-    useTheirsBtn.hidden = !session.conflict;
-    reconnectBtn.hidden = !stalled;
+    takeSeatBtn.hidden = !(offer && session.status === 'connected');
+    if (offer) takeSeatBtn.textContent = 'Play as ' + colorName(colorFromCode(offer));
 
     inviteEl.hidden = session.status === 'error';
-    inviteTextEl.textContent = session.role === 'player' && session.status === 'waiting' ?
+    inviteTextEl.textContent = opponentSeat && !opponentSeat.taken ?
       'Send this link to your opponent. You can also use it to come back to this game.' :
       'Game link. Anyone else who opens it can watch.';
     inviteUrlEl.value = roomUrl(session.roomId);
@@ -706,7 +640,9 @@
     ids.forEach(function (id) {
       var entry = rooms[id];
       var replayed = R.replay(R.decodeMoves(entry.moves));
-      var sides = entry.sides.map(function (code) { return colorName(colorFromCode(code)); });
+      var sides = Object.keys(entry.tokens).sort().map(function (code) {
+        return colorName(colorFromCode(code));
+      });
       var item = document.createElement('li');
       var label = document.createElement('span');
       label.textContent = 'You played ' + sides.join(' and ') + ' · ' +
@@ -715,7 +651,7 @@
       var resume = document.createElement('button');
       resume.type = 'button';
       resume.textContent = 'Resume';
-      resume.addEventListener('click', function () { openRoom(id, false); });
+      resume.addEventListener('click', function () { openRoom(id); });
       var forget = document.createElement('button');
       forget.type = 'button';
       forget.textContent = 'Forget';
@@ -772,21 +708,18 @@
   newGameBtn.addEventListener('click', newGame);
   undoBtn.addEventListener('click', undo);
   takeSeatBtn.addEventListener('click', function () {
-    if (online && online.openSeat) claimSeat(online, online.openSeat);
-  });
-  useTheirsBtn.addEventListener('click', useTheirVersion);
-  reconnectBtn.addEventListener('click', function () {
-    if (!online || !online.connection) return;
-    online.connection.reconnect();
-    online.phaseSince = Date.now();
-    render();
+    var offer = online && seatOnOffer(online);
+    if (offer && !online.pending) {
+      online.pending = online.connection.send({ type: 'claim', side: offer });
+      render();
+    }
   });
   modeEl.addEventListener('change', function () { startMode(modeEl.value); });
   hintsEl.addEventListener('change', render);
   window.addEventListener('hashchange', function () {
     var room = roomFromHash();
     if (room) {
-      if (!online || online.roomId !== room) openRoom(room, false);
+      if (!online || online.roomId !== room) openRoom(room);
     } else if (mode === 'online') {
       startMode('cpu');
     }
@@ -794,6 +727,6 @@
 
   buildBoard();
   var initialRoom = roomFromHash();
-  if (initialRoom) openRoom(initialRoom, false);
+  if (initialRoom) openRoom(initialRoom);
   else startMode('cpu');
 })();
